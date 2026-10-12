@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "297964667774",
+    "project_id": "rx-pharm-assist",
+    "storage_bucket": "rx-pharm-assist.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:297964667774:android:d73d8dde22e8a8964ee92f",
+        "android_client_info": {
+          "package_name": "com.example.rx_pharm_assist"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "297964667774-e6f3hqts15nvqcrghedap6qjo1r6bhs8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-MCAiJvW_5Whpk8tfs0FFLZIsrrI3JEs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "297964667774-e6f3hqts15nvqcrghedap6qjo1r6bhs8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
