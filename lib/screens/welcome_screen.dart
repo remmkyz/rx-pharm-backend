@@ -2,24 +2,22 @@ import 'package:flutter/material.dart';
 import '../widgets/wave_header.dart';
 import 'login_screen.dart';
 
-class WelcomeScreen extends StatefulWidget {
+class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
 
-  @override
-  State<WelcomeScreen> createState() => _WelcomeScreenState();
-}
-
-class _WelcomeScreenState extends State<WelcomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Column(
         children: [
-          // Top curved gradient header with app logo
-          WaveHeader(
+          // Top curved gradient header with white-boxed app logo
+          const WaveHeader(
             height: 240,
-            child: const Center(child: RxLogo()),
+            child: RxLogo(
+              width: 115,
+              height: 115,
+            ),
           ),
           const SizedBox(height: 30),
 
@@ -29,7 +27,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
             height: 160,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              color: Color(0xFFF77426), // Orange background matching UI design
+              color: Color(0xFFF77426),
             ),
             child: Center(
               child: Image.asset(
@@ -120,7 +118,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 48), // Padding below the Continue button
+          const SizedBox(height: 48),
         ],
       ),
     );

@@ -10,6 +10,7 @@ import '../widgets/wave_header.dart';
 import 'user_info_screen.dart';
 import 'history_screen.dart';
 import 'settings_screen.dart';
+import '../widgets/header_notification_bell.dart';
 
 class ChatMessage {
   final String text;
@@ -84,7 +85,7 @@ class _AskAiScreenState extends State<AskAiScreen> {
     _scrollToBottom();
 
     try {
-      final url = Uri.parse('https://hypnoses-putdown-shining.ngrok-free.dev/api/chat');
+      final String backendUrl = 'https://rx-pharm-backend.onrender.com';
 
       String? imageBase64;
       if (selectedImage != null) {
@@ -93,7 +94,7 @@ class _AskAiScreenState extends State<AskAiScreen> {
       }
 
       final response = await http.post(
-        url,
+        Uri.parse('$backendUrl/api/chat'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'message': text,
@@ -230,112 +231,58 @@ class _AskAiHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 170,
+    return WaveHeader(
+      height: 220,
       child: Stack(
         children: [
-          ClipPath(
-            clipper: _AskAiWaveClipper(),
-            child: Container(
-              width: double.infinity,
-              height: 140,
-              padding: const EdgeInsets.fromLTRB(16, 40, 16, 10),
-              color: const Color(0xFFFFB380),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Row(
-                    children: [
-                      if (Navigator.canPop(context))
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8.0),
-                          child: InkWell(
-                            onTap: () => Navigator.pop(context),
-                            borderRadius: BorderRadius.circular(20),
-                            child: const Padding(
-                              padding: EdgeInsets.all(4.0),
-                              child: Icon(
-                                Icons.arrow_back,
-                                color: Colors.black87,
-                                size: 26,
-                              ),
-                            ),
-                          ),
-                        ),
-                      const SizedBox(
-                        height: 36,
-                        child: RxLogo(),
-                      ),
-                    ],
-                  ),
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        icon: const Icon(
-                          Icons.notifications_none,
-                          color: Colors.black87,
-                          size: 28,
-                        ),
-                        onPressed: () {},
-                      ),
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        child: Container(
-                          width: 10,
-                          height: 10,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFE8231F),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+          // Centered white-boxed RxLogo
+          const Center(
+            child: RxLogo(
+              width: 110,
+              height: 110,
             ),
           ),
-          Positioned(
-            left: 12,
-            bottom: 0,
-            child: InkWell(
-              onTap: onMenuPressed,
-              borderRadius: BorderRadius.circular(20),
-              child: const Padding(
-                padding: EdgeInsets.all(4.0),
-                child: Icon(Icons.menu, size: 30, color: Colors.black87),
-              ),
+          // Top action buttons row (Back / Menu / Notification Bell)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    if (Navigator.canPop(context)) ...[
+                      Material(
+                        color: Colors.white,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: () => Navigator.pop(context),
+                          child: const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.black87),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    InkWell(
+                      onTap: onMenuPressed,
+                      borderRadius: BorderRadius.circular(20),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4.0),
+                        child: Icon(Icons.menu, color: Colors.white, size: 26),
+                      ),
+                    ),
+                  ],
+                ),
+                const HeaderNotificationBell(),
+              ],
             ),
           ),
         ],
       ),
     );
   }
-}
-
-class _AskAiWaveClipper extends CustomClipper<Path> {
-  @override
-  Path getClip(Size size) {
-    final path = Path();
-    path.lineTo(0, size.height - 30);
-    path.quadraticBezierTo(
-      size.width * 0.5,
-      size.height + 10,
-      size.width,
-      size.height - 30,
-    );
-    path.lineTo(size.width, 0);
-    path.close();
-    return path;
-  }
-
-  @override
-  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
 class _AskAiHero extends StatelessWidget {
@@ -572,6 +519,7 @@ class _DashboardDrawer extends StatelessWidget {
           color: Color(0xFFF7F2FA),
           borderRadius: BorderRadius.only(
             topRight: Radius.circular(32),
+            bottomRight: Radius.circular(32),
           ),
         ),
         child: SafeArea(

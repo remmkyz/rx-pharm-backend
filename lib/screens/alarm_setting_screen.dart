@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/alarm_item.dart';
-import 'placeholder_screen.dart';
 
 enum RepeatOption { once, repeat, custom }
 
@@ -20,7 +19,7 @@ class _AlarmSettingScreenState extends State<AlarmSettingScreen> {
   late int _minute; // 0-59
   late RepeatOption _selectedRepeatOption;
   late Set<String> _selectedDays;
-  final String _soundName = 'Nature';
+  late String _soundName;
   late bool _vibration;
 
   late TextEditingController _noteController;
@@ -45,6 +44,7 @@ class _AlarmSettingScreenState extends State<AlarmSettingScreen> {
         _selectedRepeatOption = RepeatOption.custom;
       }
 
+      _soundName = existing.soundName.isNotEmpty ? existing.soundName : 'Alarm (MP3)';
       _vibration = existing.vibration;
       _noteController = TextEditingController(text: existing.label);
     } else {
@@ -53,6 +53,7 @@ class _AlarmSettingScreenState extends State<AlarmSettingScreen> {
       _minute = 0;
       _selectedRepeatOption = RepeatOption.once;
       _selectedDays = {};
+      _soundName = 'Alarm (MP3)'; // Default to your custom MP3 file option
       _vibration = true;
       _noteController = TextEditingController(text: '');
     }
@@ -259,13 +260,17 @@ class _AlarmSettingScreenState extends State<AlarmSettingScreen> {
                     title: 'Alarm Sound',
                     subtitle: _soundName,
                     onTap: () async {
-                      await Navigator.push(
+                      final selectedSound = await Navigator.push<String>(
                         context,
                         MaterialPageRoute(
-                          builder: (_) =>
-                              const PlaceholderScreen(title: 'Alarm Sound'),
+                          builder: (_) => AlarmSoundSelectionScreen(currentSound: _soundName),
                         ),
                       );
+                      if (selectedSound != null) {
+                        setState(() {
+                          _soundName = selectedSound;
+                        });
+                      }
                     },
                   ),
                   const SizedBox(height: 16),
@@ -315,6 +320,51 @@ class _AlarmSettingScreenState extends State<AlarmSettingScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// ALARM SOUND SELECTION SCREEN
+// ==========================================
+class AlarmSoundSelectionScreen extends StatelessWidget {
+  final String currentSound;
+
+  const AlarmSoundSelectionScreen({super.key, required this.currentSound});
+
+  @override
+  Widget build(BuildContext context) {
+    final List<String> availableSounds = [
+      'Alarm (MP3)',
+      'Nature',
+      'Digital Beep',
+      'Gentle Chime',
+    ];
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text('Select Alarm Sound', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFFE8231F),
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: ListView.builder(
+        itemCount: availableSounds.length,
+        itemBuilder: (context, index) {
+          final sound = availableSounds[index];
+          final isSelected = sound == currentSound;
+
+          return ListTile(
+            title: Text(sound, style: const TextStyle(fontWeight: FontWeight.w600)),
+            trailing: isSelected
+                ? const Icon(Icons.check_circle, color: Color(0xFFE8231F))
+                : const Icon(Icons.circle_outlined, color: Colors.grey),
+            onTap: () {
+              Navigator.pop(context, sound);
+            },
+          );
+        },
       ),
     );
   }

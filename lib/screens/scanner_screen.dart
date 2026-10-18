@@ -1,7 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/prescription.dart';
+import '../services/prescription_parser.dart';
+import '../services/user_data_service.dart';
+import '../widgets/header_notification_bell.dart';
 
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
@@ -13,10 +18,25 @@ class ScannerScreen extends StatefulWidget {
 class _ScannerScreenState extends State<ScannerScreen> {
   XFile? _capturedImage;
   bool _isProcessing = false;
-  bool _isBlurry = false;
-  Prescription? _extractedDetails;
+  String? _errorMessage;
+
+  // Strictly null until a valid prescription (Rx + supporting fields) is verified
+  ParsedPrescription? _result;
+
+  // Patient name is usually handwritten (OCR can't read it), so the user
+  // types it in after the scan.
+  final TextEditingController _patientNameController = TextEditingController();
 
   final ImagePicker _picker = ImagePicker();
+  final TextRecognizer _recognizer =
+      TextRecognizer(script: TextRecognitionScript.latin);
+
+  @override
+  void dispose() {
+    _recognizer.close();
+    _patientNameController.dispose();
+    super.dispose();
+  }
 
   Future<void> _captureImage() async {
     final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
@@ -25,64 +45,142 @@ class _ScannerScreenState extends State<ScannerScreen> {
     setState(() {
       _capturedImage = photo;
       _isProcessing = true;
-      _isBlurry = false;
-      _extractedDetails = null;
+      _errorMessage = null;
+      _result = null;
+      _patientNameController.clear();
     });
 
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      // 1. Real OCR: read all text in the photo
+      final recognized =
+          await _recognizer.processImage(InputImage.fromFilePath(photo.path));
 
-    if (photo.path.contains('blur')) {
+      final text = recognized.blocks
+          .expand((b) => b.lines)
+          .map((l) => l.text)
+          .join('\n');
+
+      debugPrint('=== OCR TEXT ===\n$text\n================');
+
+      // 2. Not a prescription -> show the "No Prescription Found!" view
+      final parsed = PrescriptionParser.parse(text);
+      if (parsed == null) {
+        setState(() {
+          _isProcessing = false;
+          _errorMessage = 'No Prescription Found!';
+          _result = null;
+        });
+        return;
+      }
+
+      // 3. Valid prescription -> show the translated result.
+      //    Pre-fill the patient name if OCR managed to read one.
       setState(() {
         _isProcessing = false;
-        _isBlurry = true;
+        _result = parsed;
+        _patientNameController.text = parsed.patientName ?? '';
       });
-      return;
+    } catch (e, st) {
+      debugPrint('OCR ERROR: $e\n$st');
+      setState(() {
+        _isProcessing = false;
+        _errorMessage = 'No Prescription Found!';
+        _result = null;
+      });
     }
-
-    setState(() {
-      _isProcessing = false;
-      _extractedDetails = Prescription(
-        id: '00${prescriptionHistory.length + 1}',
-        patientName: 'Warren Zafra',
-        patientAge: 21,
-        date: '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
-        doctorName: 'Jerry Sy, M.D.',
-        doctorLicense: '70423',
-        imagePath: photo.path,
-        status: 'Pending',
-        medications: [
-          Medication(
-            genericName: 'Levocetirizine',
-            brandName: 'XYZAL or generic equivalents',
-            quantity: '14 days',
-            instruction: 'Take 1 tab before bedtime',
-          ),
-          Medication(
-            genericName: 'Pantoprazole + Domperidone',
-            brandName: 'Pantoprime or generic equivalents',
-            quantity: '1 month',
-            instruction: 'Take 1 capsule once a day, 30 min before food (e.g., breakfast).',
-          ),
-        ],
-      );
-    });
   }
 
   void _resetScan() {
     setState(() {
       _capturedImage = null;
-      _isBlurry = false;
-      _extractedDetails = null;
+      _errorMessage = null;
+      _result = null;
+      _patientNameController.clear();
     });
   }
 
-  void _savePrescription() {
-    if (_extractedDetails != null) {
-      prescriptionHistory.insert(0, _extractedDetails!);
+  bool _isSaving = false;
+
+  /// The camera photo lives in a temporary folder that Android can clear at
+  /// any time. Copy it into the app's own storage so it can be viewed again
+  /// from History.
+  Future<String> _persistImage(String? sourcePath) async {
+    if (sourcePath == null || sourcePath.isEmpty) return '';
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final folder = Directory('${dir.path}/prescriptions');
+      if (!await folder.exists()) await folder.create(recursive: true);
+      final dest =
+          '${folder.path}/rx_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await File(sourcePath).copy(dest);
+      return dest;
+    } catch (e) {
+      debugPrint('Could not copy prescription photo: $e');
+      return sourcePath;
+    }
+  }
+
+  Future<void> _savePrescription() async {
+    final r = _result;
+    if (r == null || _isSaving) return;
+
+    final patientName = _patientNameController.text.trim();
+    if (patientName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Prescription saved to History!')),
+        const SnackBar(
+          content: Text('Please enter the patient name before saving.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    _isSaving = true;
+    try {
+      final timestamp = DateTime.now();
+      final savedImagePath = await _persistImage(_capturedImage?.path);
+      final newId = await UserDataService.nextPrescriptionId();
+
+      // Parse age safely to an integer
+      int parsedAge = 0;
+      if (r.age != null) {
+        parsedAge = int.tryParse(r.age!) ?? 0;
+      }
+
+      // Saved under the logged-in account, so it is still there after
+      // Log Out, the Back button, or restarting the app.
+      await UserDataService.addPrescription(
+        Prescription(
+          id: newId,
+          patientName: patientName,
+          patientAge: parsedAge,
+          date: r.date ??
+              '${timestamp.day}/${timestamp.month}/${timestamp.year}',
+          doctorName: r.doctorName ?? 'Attending Physician, M.D.',
+          doctorLicense: r.doctorLicense ?? 'N/A',
+          imagePath: savedImagePath,
+          status: 'Pending',
+          medications: r.medications
+              .map((m) => Medication(
+                    genericName: '${m.name} ${m.strength ?? ''}'.trim(),
+                    brandName: m.name,
+                    quantity: m.quantity ?? 'As Prescribed',
+                    instruction: m.howToTake,
+                  ))
+              .toList(),
+        ),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Prescription saved to History successfully!'),
+          backgroundColor: Colors.green,
+        ),
       );
       Navigator.pop(context);
+    } finally {
+      _isSaving = false;
     }
   }
 
@@ -106,7 +204,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
                   onPressed: () => Navigator.pop(context),
                 ),
-                const Icon(Icons.notifications, color: Colors.white),
+                const HeaderNotificationBell(),
               ],
             ),
           ),
@@ -115,15 +213,16 @@ class _ScannerScreenState extends State<ScannerScreen> {
               padding: const EdgeInsets.all(20),
               child: _capturedImage == null
                   ? _buildCameraPrompt()
-                  : _isBlurry
-                      ? _buildBlurryErrorView()
-                      : _isProcessing
-                          ? const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(40),
-                                child: CircularProgressIndicator(color: Color(0xFFF4711E)),
-                              ),
-                            )
+                  : _isProcessing
+                      ? const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(40),
+                            child: CircularProgressIndicator(
+                                color: Color(0xFFF4711E)),
+                          ),
+                        )
+                      : _errorMessage != null
+                          ? _buildErrorView(_errorMessage!)
                           : _buildPrescriptionDetailsView(),
             ),
           ),
@@ -135,14 +234,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
   Widget _buildCameraPrompt() {
     return Column(
       children: [
-        const Text(
-          'Scan Your Prescription',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-        ),
-        const Text(
-          'Place the prescription within the frame to scan',
-          style: TextStyle(fontSize: 13, color: Colors.grey),
-        ),
+        const Text('Scan Your Prescription',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        const Text('Place the prescription within the frame to scan',
+            style: TextStyle(fontSize: 13, color: Colors.grey)),
         const SizedBox(height: 20),
         Container(
           height: 280,
@@ -164,61 +259,80 @@ class _ScannerScreenState extends State<ScannerScreen> {
           child: ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFF4711E),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(25)),
             ),
             onPressed: _captureImage,
             icon: const Icon(Icons.camera_alt, color: Colors.white),
-            label: const Text('Scan Prescription', style: TextStyle(color: Colors.white, fontSize: 16)),
+            label: const Text('Scan Prescription',
+                style: TextStyle(color: Colors.white, fontSize: 16)),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildBlurryErrorView() {
+  Widget _buildErrorView(String message) {
     return Column(
       children: [
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.black54,
+            color: Colors.white,
             borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05), blurRadius: 10)
+            ],
           ),
           child: Column(
             children: [
-              Image.file(File(_capturedImage!.path), height: 200, fit: BoxFit.cover),
-              const SizedBox(height: 12),
-              const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 48),
+              if (_capturedImage != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(File(_capturedImage!.path),
+                      height: 180, width: double.infinity, fit: BoxFit.cover),
+                ),
+              const SizedBox(height: 16),
+              const Icon(Icons.warning_amber_rounded,
+                  color: Colors.redAccent, size: 52),
+              const SizedBox(height: 8),
+              Text(message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Colors.redAccent)),
+              const SizedBox(height: 6),
               const Text(
-                'Image is blurry or not readable',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              const Text(
-                'We couldn’t detect the text from this image. Please try scanning again.',
+                'Please make sure a prescription with the Rx symbol is clearly visible in the frame.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+                style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         Row(
           children: [
             Expanded(
               child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF4711E)),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFF4711E)),
                 onPressed: _captureImage,
                 icon: const Icon(Icons.refresh, color: Colors.white),
-                label: const Text('Retry Scan', style: TextStyle(color: Colors.white)),
+                label: const Text('Retry Scan',
+                    style: TextStyle(color: Colors.white)),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFF4711E)),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.grey.shade700),
                 onPressed: _resetScan,
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Discard'),
+                icon: const Icon(Icons.close),
+                label: const Text('Cancel'),
               ),
             ),
           ],
@@ -228,7 +342,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
   }
 
   Widget _buildPrescriptionDetailsView() {
-    if (_extractedDetails == null) return const SizedBox();
+    final r = _result;
+    if (r == null) return const SizedBox(); // nothing displayed
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -236,8 +351,11 @@ class _ScannerScreenState extends State<ScannerScreen> {
         const Center(
           child: Column(
             children: [
-              Text('Prescription Details', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-              Text('Check your medication information', style: TextStyle(fontSize: 13, color: Colors.grey)),
+              Text('Your Prescription',
+                  style:
+                      TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              Text('Here is what your doctor wrote, in plain language',
+                  style: TextStyle(fontSize: 13, color: Colors.grey)),
             ],
           ),
         ),
@@ -247,25 +365,59 @@ class _ScannerScreenState extends State<ScannerScreen> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10)],
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05), blurRadius: 10)
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Patient Information', style: TextStyle(color: Color(0xFFF4711E), fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Patient Name: ${_extractedDetails!.patientName}', style: const TextStyle(fontWeight: FontWeight.w600)),
-                  Text('Date: ${_extractedDetails!.date}', style: const TextStyle(color: Colors.black54)),
-                ],
+              const Text('Patient',
+                  style: TextStyle(
+                      color: Color(0xFFF4711E), fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+
+              // Patient name: typed by the user after the scan
+              TextField(
+                controller: _patientNameController,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                decoration: InputDecoration(
+                  labelText: 'Patient name',
+                  hintText: 'Type the patient\'s full name',
+                  prefixIcon: const Icon(Icons.person_outline,
+                      color: Color(0xFFF4711E)),
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                        color: Color(0xFFF4711E), width: 2),
+                  ),
+                ),
               ),
-              Text('Age: ${_extractedDetails!.patientAge}', style: const TextStyle(color: Colors.black54)),
+              const SizedBox(height: 8),
+              if (r.dateOfBirth != null)
+                Text('Date of birth: ${r.dateOfBirth}',
+                    style: const TextStyle(color: Colors.black54)),
+              if (r.age != null)
+                Text('Age: ${r.age}',
+                    style: const TextStyle(color: Colors.black54)),
+              if (r.date != null)
+                Text('Prescribed on: ${r.date}',
+                    style:
+                        const TextStyle(color: Colors.black54, fontSize: 12)),
               const Divider(height: 24),
-              ..._extractedDetails!.medications.asMap().entries.map((entry) {
-                final idx = entry.key + 1;
-                final med = entry.value;
+              if (r.medications.isEmpty)
+                const Text(
+                  'We could not read the medicine clearly. Please retake the photo or ask your pharmacist.',
+                  style: TextStyle(color: Colors.black54),
+                ),
+              ...r.medications.asMap().entries.map((e) {
+                final med = e.value;
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.all(12),
@@ -275,21 +427,47 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     border: Border.all(color: Colors.grey.shade200),
                   ),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const CircleAvatar(
                         backgroundColor: Color(0xFFFFEBE0),
-                        child: Icon(Icons.medication, color: Color(0xFFF4711E)),
+                        child: Icon(Icons.medication,
+                            color: Color(0xFFF4711E)),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Medication $idx', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            Text('Generic Name: ${med.genericName}', style: const TextStyle(fontSize: 12)),
-                            Text('Brand: ${med.brandName}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                            Text('Quantity: ${med.quantity}', style: const TextStyle(fontSize: 11)),
-                            Text('Instruction: ${med.instruction}', style: const TextStyle(fontSize: 11, color: Colors.black87)),
+                            Text(
+                              '${med.name}${med.strength != null ? ' · ${med.strength}' : ''}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 15),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text('How to take it',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey)),
+                            Text(med.howToTake,
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600)),
+                            if (med.quantity != null) ...[
+                              const SizedBox(height: 6),
+                              Text('Amount given: ${med.quantity}',
+                                  style: const TextStyle(fontSize: 12)),
+                            ],
+                            if (med.refills != null)
+                              Text(med.refills!,
+                                  style: const TextStyle(fontSize: 12)),
+                            if (med.rawInstruction.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Text('Written as: "${med.rawInstruction}"',
+                                  style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey,
+                                      fontStyle: FontStyle.italic)),
+                            ],
                           ],
                         ),
                       ),
@@ -297,14 +475,30 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   ),
                 );
               }),
-              const Divider(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Doctor: ${_extractedDetails!.doctorName}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text('License No: ${_extractedDetails!.doctorLicense}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
-              )
+              if (r.doctorName != null || r.doctorLicense != null) ...[
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    if (r.doctorName != null)
+                      Expanded(
+                        child: Text('Doctor: ${r.doctorName}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 12),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    if (r.doctorLicense != null)
+                      Text('License No: ${r.doctorLicense}',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 8),
+              const Text(
+                'Scanned text may contain errors. Always confirm with your doctor or pharmacist before taking any medicine.',
+                style: TextStyle(fontSize: 10, color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -315,10 +509,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
           children: [
             Expanded(
               child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF4711E)),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFF4711E)),
                 onPressed: _captureImage,
                 icon: const Icon(Icons.refresh, size: 16, color: Colors.white),
-                label: const Text('Retry', style: TextStyle(color: Colors.white, fontSize: 12)),
+                label: const Text('Retry',
+                    style: TextStyle(color: Colors.white, fontSize: 12)),
               ),
             ),
             const SizedBox(width: 8),
@@ -363,22 +559,22 @@ class _ScannerScreenState extends State<ScannerScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(8),
-            decoration: const BoxDecoration(color: Color(0xFFFFEBE0), shape: BoxShape.circle),
-            child: const Icon(Icons.shield_outlined, color: Color(0xFFF4711E)),
+            decoration: const BoxDecoration(
+                color: Color(0xFFFFEBE0), shape: BoxShape.circle),
+            child:
+                const Icon(Icons.shield_outlined, color: Color(0xFFF4711E)),
           ),
           const SizedBox(width: 12),
           const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text('Data Privacy & Security',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 Text(
-                  'Data Privacy & Security',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-                Text(
-                  'Your scanned prescriptions are securely processed and kept confidential.',
-                  style: TextStyle(fontSize: 11, color: Colors.grey),
-                ),
+                    'Your scanned prescriptions are securely processed and kept confidential.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey)),
               ],
             ),
           ),

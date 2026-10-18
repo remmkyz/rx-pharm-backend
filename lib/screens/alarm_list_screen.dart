@@ -11,6 +11,7 @@ import 'alarm_setting_screen.dart';
 import 'user_info_screen.dart';
 import 'settings_screen.dart';
 import 'history_screen.dart';
+import '../widgets/header_notification_bell.dart';
 
 class AlarmListScreen extends StatefulWidget {
   const AlarmListScreen({super.key});
@@ -32,9 +33,14 @@ class _AlarmListScreenState extends State<AlarmListScreen> {
   @override
   void initState() {
     super.initState();
+    _loadData();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _checkAlarms());
   }
 
+Future<void> _loadData() async {
+  await _alarmService.loadUserAlarms();
+  if (mounted) setState(() {});
+}
   @override
   void dispose() {
     _timer?.cancel();
@@ -383,24 +389,7 @@ class _AlarmHeader extends StatelessWidget {
                 ],
               )
             else
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Icon(Icons.notifications_none, color: Colors.white, size: 26),
-                  Positioned(
-                    right: -1,
-                    top: -1,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              const HeaderNotificationBell(),
           ],
         ),
       ),

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import '../services/user_session.dart';
-import 'login_screen.dart';
+import '../services/user_data_service.dart';
+import '../services/auth_helper.dart';
+import 'contact_info_screen.dart'; // <-- Added import
+import 'notification_settings_screen.dart'; // <-- Added import
 
 class UserInfoScreen extends StatefulWidget {
   const UserInfoScreen({super.key});
@@ -12,6 +14,17 @@ class UserInfoScreen extends StatefulWidget {
 }
 
 class _UserInfoScreenState extends State<UserInfoScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    await UserDataService.loadUserProfile();
+    if (mounted) setState(() {});
+  }
+
   String _getUserDisplayName() {
     if (UserSession.name.isNotEmpty) {
       return UserSession.name;
@@ -29,25 +42,6 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
       return user.email!;
     }
     return UserSession.email;
-  }
-
-  void _handleLogout(BuildContext context) async {
-    await FirebaseAuth.instance.signOut();
-
-    final GoogleSignIn googleSignIn = GoogleSignIn();
-    if (await googleSignIn.isSignedIn()) {
-      await googleSignIn.signOut();
-    }
-
-    UserSession.clear();
-
-    if (!context.mounted) return;
-
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (route) => false,
-    );
   }
 
   void _navigateToEditDetails(BuildContext context) async {
@@ -190,19 +184,29 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
                     icon: Icons.phone,
                     title: 'Contact Information',
                     subtitle: 'Phone and Email',
-                    onTap: () {},
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ContactInfoScreen()),
+                      );
+                    },
                   ),
                   _UserMenuCard(
                     icon: Icons.medication,
                     title: 'My Medicines',
                     subtitle: 'Manage your Alerts',
-                    onTap: () {},
+                    onTap: () {}, // Kept open for Scanner integration later
                   ),
                   _UserMenuCard(
                     icon: Icons.notifications,
                     title: 'Notifications',
                     subtitle: 'Manage notification settings',
-                    onTap: () {},
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+                      );
+                    },
                   ),
                   const SizedBox(height: 24),
 
@@ -218,7 +222,7 @@ class _UserInfoScreenState extends State<UserInfoScreen> {
                           ),
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
-                        onPressed: () => _handleLogout(context),
+                        onPressed: () => AuthHelper.performLogout(context),
                         icon: const Icon(Icons.logout, color: Color(0xFFFF7A00)),
                         label: const Text(
                           'Log out',
@@ -302,6 +306,7 @@ class _HeaderWaveClipper extends CustomClipper<Path> {
   bool shouldReclip(CustomClipper<Path> oldClipper) => false;
 }
 
+// EditUserDetailScreen remains the same as previously defined for Personal Information
 class EditUserDetailScreen extends StatefulWidget {
   const EditUserDetailScreen({super.key});
 
@@ -323,21 +328,8 @@ class _EditUserDetailScreenState extends State<EditUserDetailScreen> {
   void initState() {
     super.initState();
 
-    String initFirstName = UserSession.firstName;
-    String initLastName = UserSession.lastName;
-
-    if (initFirstName.isEmpty && initLastName.isEmpty) {
-      final user = FirebaseAuth.instance.currentUser;
-      final displayName = user?.displayName ?? UserSession.name;
-      if (displayName.isNotEmpty) {
-        final parts = displayName.split(' ');
-        initFirstName = parts.first;
-        initLastName = parts.length > 1 ? parts.sublist(1).join(' ') : '';
-      }
-    }
-
-    _firstNameController = TextEditingController(text: initFirstName);
-    _lastNameController = TextEditingController(text: initLastName);
+    _firstNameController = TextEditingController(text: UserSession.firstName);
+    _lastNameController = TextEditingController(text: UserSession.lastName);
     _ageController = TextEditingController(text: UserSession.age);
     _dobController = TextEditingController(text: UserSession.dob);
     _emergencyContactController = TextEditingController(text: UserSession.emergencyContact);
@@ -371,15 +363,7 @@ class _EditUserDetailScreenState extends State<EditUserDetailScreen> {
     final fullName = '$firstName $lastName'.trim();
     UserSession.name = fullName.isNotEmpty ? fullName : 'Guest';
 
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null && fullName.isNotEmpty) {
-      try {
-        await user.updateDisplayName(fullName);
-        await user.reload(); // Ensures Firebase instance has the updated name locally
-      } catch (e) {
-        debugPrint('Error updating Firebase display name: $e');
-      }
-    }
+    await UserDataService.saveUserProfile();
 
     if (mounted) Navigator.pop(context);
   }

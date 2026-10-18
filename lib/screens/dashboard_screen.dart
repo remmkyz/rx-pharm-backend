@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/user_session.dart';
 import '../services/auth_helper.dart';
+import '../services/user_data_service.dart';
 import 'alarm_list_screen.dart';
 import 'ask_ai_screen.dart';
 import 'map_screen.dart';
@@ -9,6 +10,7 @@ import 'user_info_screen.dart';
 import 'settings_screen.dart';
 import 'history_screen.dart';
 import 'scanner_screen.dart';
+import '../widgets/header_notification_bell.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -20,14 +22,23 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  @override
+  void initState() {
+    super.initState();
+    _loadUserProfile();
+  }
+
+  Future<void> _loadUserProfile() async {
+    await UserDataService.loadUserProfile();
+    if (mounted) setState(() {});
+  }
+
   String _getUserDisplayName({bool fullName = false}) {
     String name = '';
 
-    // 1. Prioritize UserSession name if available
     if (UserSession.name.isNotEmpty && UserSession.name != 'User') {
       name = UserSession.name;
     } else {
-      // 2. Fall back to Firebase user display name
       final firebaseUser = FirebaseAuth.instance.currentUser;
       if (firebaseUser?.displayName != null && firebaseUser!.displayName!.isNotEmpty) {
         name = firebaseUser.displayName!;
@@ -51,80 +62,83 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final displayName = _getUserDisplayName(fullName: false);
     final fullName = _getUserDisplayName(fullName: true);
 
-    return Scaffold(
-      key: _scaffoldKey,
-      backgroundColor: Colors.white,
-      drawer: _DashboardDrawer(
-        fullName: fullName,
-        onLogout: () => AuthHelper.performLogout(context),
-        onUserUpdated: _refreshState,
-      ),
-      body: Column(
-        children: [
-          _DashboardHeader(
-            userName: displayName,
-            onMenuPressed: () => _scaffoldKey.currentState?.openDrawer(),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'What can we help you with today?',
-                    style: TextStyle(fontSize: 14, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 20),
-                  _FeatureCard(
-                    icon: Icons.alarm,
-                    label: 'Schedule and Alarm',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const AlarmListScreen()),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  _FeatureCard(
-                    icon: Icons.smart_toy_outlined,
-                    label: 'Ask AI',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const AskAiScreen()),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  _FeatureCard(
-                    icon: Icons.location_on_outlined,
-                    label: 'Map',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const MapScreen()),
-                      );
-                    },
-                  ),
-                ],
+    return PopScope(
+      canPop: false, // Prevents system/hardware back button from going back to disclaimer/login
+      child: Scaffold(
+        key: _scaffoldKey,
+        backgroundColor: Colors.white,
+        drawer: _DashboardDrawer(
+          fullName: fullName,
+          onLogout: () => AuthHelper.performLogout(context),
+          onUserUpdated: _refreshState,
+        ),
+        body: Column(
+          children: [
+            _DashboardHeader(
+              userName: displayName,
+              onMenuPressed: () => _scaffoldKey.currentState?.openDrawer(),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'What can we help you with today?',
+                      style: TextStyle(fontSize: 14, color: Colors.black54),
+                    ),
+                    const SizedBox(height: 20),
+                    _FeatureCard(
+                      icon: Icons.alarm,
+                      label: 'Schedule and Alarm',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const AlarmListScreen()),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _FeatureCard(
+                      icon: Icons.smart_toy_outlined,
+                      label: 'Ask AI',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const AskAiScreen()),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _FeatureCard(
+                      icon: Icons.location_on_outlined,
+                      label: 'Map',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const MapScreen()),
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          backgroundColor: const Color(0xFFE8231F),
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ScannerScreen()),
+            );
+          },
+          child: const Icon(Icons.crop_free, color: Colors.white),
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xFFE8231F),
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ScannerScreen()),
-          );
-        },
-        child: const Icon(Icons.crop_free, color: Colors.white),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
 }
@@ -332,18 +346,7 @@ class _DashboardHeader extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    if (Navigator.canPop(context))
-                      Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: InkWell(
-                          onTap: () => Navigator.pop(context),
-                          borderRadius: BorderRadius.circular(20),
-                          child: const Padding(
-                            padding: EdgeInsets.all(4),
-                            child: Icon(Icons.arrow_back, color: Colors.black87, size: 24),
-                          ),
-                        ),
-                      ),
+                    // Back button completely removed from here
                     InkWell(
                       onTap: onMenuPressed,
                       borderRadius: BorderRadius.circular(20),
@@ -354,24 +357,7 @@ class _DashboardHeader extends StatelessWidget {
                     ),
                   ],
                 ),
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.notifications_none, color: Color.fromARGB(221, 251, 250, 250), size: 26),
-                    Positioned(
-                      right: -1,
-                      top: -1,
-                      child: Container(
-                        width: 10,
-                        height: 10,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFE8231F),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                const HeaderNotificationBell(),
               ],
             ),
             const SizedBox(height: 20),

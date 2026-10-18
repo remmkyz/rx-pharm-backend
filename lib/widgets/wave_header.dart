@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// The red-to-orange gradient shape with the curved bottom edge,
-/// used at the top of both the Welcome and Login screens.
+/// used at the top of authentication and main screens.
 class WaveHeader extends StatelessWidget {
   final double height;
   final Widget child;
@@ -29,9 +29,11 @@ class WaveHeader extends StatelessWidget {
             ],
           ),
         ),
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 30),
-          child: child,
+        child: SafeArea(
+          bottom: false,
+          child: Center(
+            child: child,
+          ),
         ),
       ),
     );
@@ -87,59 +89,133 @@ class HeaderBackButton extends StatelessWidget {
     );
   }
 }
-class RxLogo extends StatelessWidget {
-  final double fontSize;
 
-  const RxLogo({super.key, this.fontSize = 34});
+/// The branded RxLogo enclosed in a white rounded container card with shadow.
+class RxLogo extends StatelessWidget {
+  final double width;
+  final double height;
+
+  const RxLogo({
+    super.key,
+    this.width = 115,
+    this.height = 115,
+    double? fontSize, // Kept for backwards compatibility if passed elsewhere
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        RichText(
-          text: TextSpan(
+    return Container(
+      width: width,
+      height: height,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Graphic "Rx" Icon styling
+          SizedBox(
+            height: 38,
+            width: 44,
+            child: Stack(
+              children: [
+                const Positioned(
+                  left: 2,
+                  top: 0,
+                  child: Text(
+                    'P',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF2C3137),
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 2,
+                  top: 8,
+                  child: Container(
+                    width: 4.5,
+                    height: 28,
+                    color: const Color(0xFF2C3137),
+                  ),
+                ),
+                const Positioned(
+                  right: 2,
+                  bottom: 2,
+                  child: Text(
+                    'x',
+                    style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFFF4711E),
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 2),
+
+          // PHARM Text
+          const Text(
+            'PHARM',
             style: TextStyle(
-              fontSize: fontSize,
+              fontSize: 12,
               fontWeight: FontWeight.w900,
-              color: Colors.black,
+              letterSpacing: 2.2,
+              color: Color(0xFF2C3137),
               height: 1.0,
             ),
-            children: const [
-              TextSpan(text: 'R'),
-              TextSpan(
-                text: 'x',
-                style: TextStyle(fontStyle: FontStyle.italic),
+          ),
+          const SizedBox(height: 1),
+
+          // ASSIST Text
+          const Text(
+            'ASSIST',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 2.4,
+              color: Color(0xFFF4711E),
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(height: 3),
+
+          // Tagline Divider
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(width: 6, height: 0.8, color: Colors.grey.shade400),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  'PRECISION IN EVERY PRESCRIPTION',
+                  style: TextStyle(
+                    fontSize: 3.8,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                    color: Color(0xFF2C3137),
+                  ),
+                ),
               ),
+              Container(width: 6, height: 0.8, color: Colors.grey.shade400),
             ],
           ),
-        ),
-        Text(
-          'PHARM',
-          style: TextStyle(
-            fontSize: fontSize * 0.5,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 3,
-            color: Colors.black,
-          ),
-        ),
-        Text(
-          'ASSIST',
-          style: TextStyle(
-            fontSize: fontSize * 0.28,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 4,
-            color: Colors.black54,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '— Freedom in every prescription —',
-          style: TextStyle(
-            fontSize: fontSize * 0.22,
-            color: Colors.black54,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
