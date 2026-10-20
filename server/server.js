@@ -94,6 +94,13 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+// Language chosen in the app (sent with every request)
+function languageName(language) {
+  if (language === 'Filipino') return 'Filipino (Tagalog)';
+  if (language === 'Spanish') return 'Spanish';
+  return 'English';
+}
+
 // Detect the image type from the first bytes of the base64 string.
 function detectMimeType(base64) {
   if (base64.startsWith('/9j/')) return 'image/jpeg';
@@ -104,7 +111,7 @@ function detectMimeType(base64) {
 
 app.post('/api/chat', chatLimiter, async (req, res) => {
   try {
-    const { message, image } = req.body || {};
+    const { message, image, language } = req.body || {};
     const text = typeof message === 'string' ? message.trim() : '';
     const hasImage = typeof image === 'string' && image.length > 0;
 
@@ -132,7 +139,11 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     const response = await ai.models.generateContent({
       model: MODEL,
       contents: [{ role: 'user', parts }],
-      config: { systemInstruction: SYSTEM_INSTRUCTION },
+      config: {
+        systemInstruction:
+          SYSTEM_INSTRUCTION +
+          `\n\nREPLY LANGUAGE: Always write your reply in ${languageName(language)}.`,
+      },
     });
 
     const reply =
@@ -146,6 +157,67 @@ app.post('/api/chat', chatLimiter, async (req, res) => {
     console.error('==============================================');
 
     // Details stay in the server logs, not in the response sent to users.
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// "My Medicines": what each medicine is generally used for
+// ---------------------------------------------------------------------------
+const INFO_SYSTEM_INSTRUCTION = `
+You are a careful pharmacy information assistant inside a prescription app.
+You only give general, plain-language information about what a medicine is used for.
+Never recommend that anyone take, stop, or change a medicine, never give doses,
+and never diagnose. If you are not sure what a medicine is, say so honestly.
+`.trim();
+
+app.post('/api/medicine-info', chatLimiter, async (req, res) => {
+  try {
+    const { medicines, language } = req.body || {};
+
+    if (!Array.isArray(medicines) || medicines.length === 0 || medicines.length > 10) {
+      return res.status(400).json({ error: 'Send 1 to 10 medicine names' });
+    }
+    const names = medicines.map((m) =>
+      typeof m === 'string' ? m.trim().slice(0, 200) : ''
+    );
+    if (names.some((n) => !n)) {
+      return res.status(400).json({ error: 'Invalid medicine name' });
+    }
+
+    const prompt = `
+For each medicine below, write ONE short sentence (maximum 25 words), in plain
+language (write in ${languageName(language)}) for a person with no medical knowledge, saying what problem or purpose
+the medicine is generally used for. General information only. Do not mention
+doses. If you are not sure what a medicine is, write this sentence in ${languageName(language)}:
+"Not sure about this medicine. Please ask your pharmacist."
+
+Reply with ONLY a JSON array of strings, in the same order as the list, with
+exactly one string per medicine.
+
+Medicines:
+${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}
+`.trim();
+
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction: INFO_SYSTEM_INSTRUCTION,
+        responseMimeType: 'application/json',
+      },
+    });
+
+    const uses = JSON.parse(response.text);
+    if (!Array.isArray(uses) || uses.length !== names.length) {
+      throw new Error('Unexpected answer shape from the model');
+    }
+
+    return res.status(200).json({ uses: uses.map((u) => String(u)) });
+  } catch (error) {
+    console.error('================ MEDICINE INFO ERROR ================');
+    console.error(error);
+    console.error('=====================================================');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
